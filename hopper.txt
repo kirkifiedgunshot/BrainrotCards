@@ -1,0 +1,146 @@
+-- ==========================================
+-- CONFIGURATION
+-- ==========================================
+local Config = {
+    WebhookURL = "https://discord.com/api/webhooks/1480203906335379466/VDOMo95KPDM5k8qC4JxRWgap7LbhwZ6HWWAWrBhzLULLZpRiQ344WVpwI1HBN66s6GIq", 
+    DiscordID = "1480222535902564434", 
+    TargetWeathers = {"Supercharged", "Gliched", "Glitched"}, 
+    WaitTime = 12 -- How many seconds to wait before checking the weather
+}
+-- ==========================================
+
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+
+-- 1. Simple Wait Timer
+task.wait(Config.WaitTime)
+
+-- Safely grab the GUI
+local PlayerGui = Players.LocalPlayer:WaitForChild("PlayerGui", 20)
+local HUD = PlayerGui and PlayerGui:WaitForChild("HUD", 20)
+local BottomLeft = HUD and HUD:WaitForChild("BottomLeft", 20)
+local Misc = BottomLeft and BottomLeft:WaitForChild("Misc", 20)
+local WeatherStatus = Misc and Misc:WaitForChild("WeatherStatus", 20)
+local WeatherName = WeatherStatus and WeatherStatus:WaitForChild("WeatherName", 20)
+
+-- Read the weather (fallback to "Unknown" if the GUI failed to load)
+local currentWeather = WeatherName and WeatherName.Text or "Unknown"
+
+-- 2. Webhook Function
+local function SendWebhook(weather, isSuccess)
+    if Config.WebhookURL == "YOUR_WEBHOOK_URL_HERE" or Config.WebhookURL == "" then return end
+    
+    local placeId = game.PlaceId
+    local jobId = game.JobId
+    
+    local pingContent = isSuccess and ("<@&" .. Config.DiscordID .. ">") or ""
+    local embedColor = isSuccess and 65280 or 16753920
+    local embedTitle = isSuccess and "✅ Target Weather Found!" or "🔄 Hopping Servers..."
+    
+    local joinScript = string.format('game:GetService("TeleportService"):TeleportToPlaceInstance(%d, "%s")', placeId, jobId)
+    
+    -- Fix: Standard HTTPS link so Discord allows it to be clickable
+    local webLinkURL = string.format("https://www.roblox.com/games/%d?gameInstanceId=%s", placeId, jobId)
+    local clickableLink = "[🔗 Click Here to Join Server](" .. webLinkURL .. ")"
+
+    local embedDesc = ""
+    if isSuccess then
+        embedDesc = string.format(
+            "Successfully found a server with **%s** weather!\n\n" ..
+            "**JobId:** `%s`\n\n" ..
+            "**🚀 Executor Auto-Join:**\n```lua\n%s\n```\n" ..
+            "**Browser Link:**\n%s",
+            weather, jobId, joinScript, clickableLink
+        )
+    else
+        embedDesc = string.format(
+            "Found **%s** weather. Searching for target...\n\n" ..
+            "**JobId:** `%s`\n\n" ..
+            "**🚀 Executor Auto-Join:**\n```lua\n%s\n```\n" ..
+            "**Browser Link:**\n%s",
+            weather, jobId, joinScript, clickableLink
+        )
+    end
+
+    local data = {
+        ["content"] = pingContent,
+        ["embeds"] = {{
+            ["title"] = embedTitle,
+            ["description"] = embedDesc,
+            ["color"] = embedColor
+        }}
+    }
+    
+    pcall(function()
+        local reqFunc = request or http_request or (syn and syn.request)
+        if reqFunc then
+            reqFunc({
+                Url = Config.WebhookURL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode(data)
+            })
+        end
+    end)
+end
+
+-- 3. Server Hop Function
+local function ServerHop()
+    local visitedFile = "VisitedServers_" .. game.PlaceId .. ".json"
+    local visited = {}
+    
+    pcall(function()
+        if isfile(visitedFile) then visited = HttpService:JSONDecode(readfile(visitedFile)) end
+    end)
+    
+    visited[game.JobId] = true
+    pcall(function() writefile(visitedFile, HttpService:JSONEncode(visited)) end)
+    
+    local servers = {}
+    local reqFunc = request or http_request or (syn and syn.request)
+    
+    if reqFunc then
+        local req = reqFunc({
+            Url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Desc&limit=100"
+        })
+        
+        if req and req.StatusCode == 200 then
+            local body = HttpService:JSONDecode(req.Body)
+            if body and body.data then
+                for _, v in ipairs(body.data) do
+                    if type(v) == "table" and v.playing < v.maxPlayers and not visited[v.id] then
+                        table.insert(servers, v.id)
+                    end
+                end
+            end
+        end
+    end
+    
+    if #servers > 0 then
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[math.random(1, #servers)], Players.LocalPlayer)
+    else
+        pcall(function() writefile(visitedFile, "{}") end)
+        TeleportService:Teleport(game.PlaceId, Players.LocalPlayer)
+    end
+end
+
+-- 4. Main Logic
+local foundTarget = false
+for _, target in ipairs(Config.TargetWeathers) do
+    if string.lower(currentWeather) == string.lower(target) then
+        foundTarget = true
+        break
+    end
+end
+
+if foundTarget then
+    print("Target weather found: " .. currentWeather)
+    SendWebhook(currentWeather, true)
+    pcall(function() writefile("VisitedServers_" .. game.PlaceId .. ".json", "{}") end)
+else
+    print("Current weather is " .. currentWeather .. ". Hopping...")
+    SendWebhook(currentWeather, false)
+    task.wait(1)
+    ServerHop()
+end

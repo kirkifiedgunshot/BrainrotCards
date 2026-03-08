@@ -1,0 +1,208 @@
+-- Load Dawid's Fluent UI Library and its official Add-ons
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
+-- Create the Window
+local Window = Fluent:CreateWindow({
+    Title = "Auto Farm Hub",
+    SubTitle = "by You",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 520),
+    Acrylic = true, 
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+-- Create Tabs
+local Tabs = {
+    Main = Window:AddTab({ Title = "Auto Farm", Icon = "home" }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+}
+
+-- Options Table (Used by Fluent)
+local Options = Fluent.Options
+
+-- Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService = game:GetService("GuiService")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- Remote Setup
+local restockEvent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("Request"):WaitForChild("RestockShop")
+local attractEvent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("Update"):WaitForChild("PotionAttract")
+
+-- Global Variables
+getgenv().AutoMerchant = false
+getgenv().AutoPotion = false
+getgenv().WalkSpeedEnabled = false
+getgenv().WalkSpeedValue = 16
+
+getgenv().AutoScratch = false
+getgenv().AutoNext = false
+getgenv().WaitBeforeNext = 0.5
+
+-- Memory Scan Variable
+local scratchModule = nil
+
+-- Background Loop: Auto Merchant
+task.spawn(function()
+    while true do
+        if getgenv().AutoMerchant then
+            for i = 1, 10 do
+                if not getgenv().AutoMerchant then break end
+                local args = { tostring(i), "Coins" }
+                restockEvent:FireServer(unpack(args))
+                task.wait(0.1)
+            end
+            task.wait(1)
+        else
+            task.wait(0.5)
+        end
+    end
+end)
+
+-- Background Loop: Auto Potions
+task.spawn(function()
+    while true do
+        if getgenv().AutoPotion then
+            local potionsFolder = workspace:FindFirstChild("Potions")
+            if potionsFolder then
+                for _, potion in pairs(potionsFolder:GetChildren()) do
+                    if not getgenv().AutoPotion then break end
+                    local splitName = string.split(potion.Name, "_")
+                    if splitName[2] and tonumber(splitName[2]) then
+                        attractEvent:FireServer(tonumber(splitName[2]))
+                        task.wait(0.05)
+                    end
+                end
+            end
+            task.wait(0.2)
+        else
+            task.wait(0.5)
+        end
+    end
+end)
+
+-- Background Loop: Auto Pack Opener
+task.spawn(function()
+    while true do
+        if getgenv().AutoScratch or getgenv().AutoNext then
+            
+            -- Keep scanning for the module if it hasn't been found yet
+            if not scratchModule then
+                for _, v in pairs(getgc(true)) do
+                    if type(v) == "table" and rawget(v, "Reveal") and rawget(v, "AnimateShow") and rawget(v, "SetCard") then
+                        scratchModule = v
+                        Fluent:Notify({ Title = "Module Found", Content = "Scratch module loaded successfully!", Duration = 3 })
+                        break
+                    end
+                end
+            end
+
+            -- Auto-Scratch logic
+            if getgenv().AutoScratch and scratchModule and scratchModule.IsVisible and not scratchModule.IsUnwrapped then
+                pcall(function()
+                    scratchModule.Reveal()
+                end)
+                task.wait(getgenv().WaitBeforeNext) -- Uses the dynamic GUI value
+            end
+            
+            -- Auto-Next logic
+            if getgenv().AutoNext then
+                pcall(function()
+                    local nextButton = LocalPlayer.PlayerGui.HUD.MiddleBottom.FinishedCardButtons.NextButton
+                    if nextButton and nextButton.Visible and scratchModule and scratchModule.IsUnwrapped then
+                        
+                        local absolutePos = nextButton.AbsolutePosition
+                        local absoluteSize = nextButton.AbsoluteSize
+                        local guiInset = GuiService:GetGuiInset() 
+                        
+                        local centerX = absolutePos.X + (absoluteSize.X / 2)
+                        local centerY = absolutePos.Y + (absoluteSize.Y / 2) + guiInset.Y
+                        
+                        VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, true, game, 1)
+                        task.wait(0.05)
+                        VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, false, game, 1)
+                        
+                        task.wait(0.5)
+                    end
+                end)
+            end
+            task.wait(0.1)
+        else
+            task.wait(0.5)
+        end
+    end
+end)
+
+-- Frame Loop: Constant WalkSpeed Enforcement
+RunService.Heartbeat:Connect(function()
+    if getgenv().WalkSpeedEnabled then
+        if LocalPlayer and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.WalkSpeed = getgenv().WalkSpeedValue
+        end
+    end
+end)
+
+-- ==========================================
+-- UI ELEMENTS
+-- ==========================================
+
+Tabs.Main:AddSection("Farming")
+
+local MerchantToggle = Tabs.Main:AddToggle("MerchantConfig", { Title = "Auto Merchant (1-10)", Default = false })
+MerchantToggle:OnChanged(function() getgenv().AutoMerchant = Options.MerchantConfig.Value end)
+
+local PotionToggle = Tabs.Main:AddToggle("PotionConfig", { Title = "Auto Collect Potions", Default = false })
+PotionToggle:OnChanged(function() getgenv().AutoPotion = Options.PotionConfig.Value end)
+
+
+Tabs.Main:AddSection("Pack Opener")
+
+local ScratchToggle = Tabs.Main:AddToggle("ScratchConfig", { Title = "Auto Scratch Reveal", Default = false })
+ScratchToggle:OnChanged(function() getgenv().AutoScratch = Options.ScratchConfig.Value end)
+
+local NextToggle = Tabs.Main:AddToggle("NextConfig", { Title = "Auto Click Next", Default = false })
+NextToggle:OnChanged(function() getgenv().AutoNext = Options.NextConfig.Value end)
+
+local RevealDelaySlider = Tabs.Main:AddSlider("RevealDelaySlider", {
+    Title = "Reveal Animation Wait Time",
+    Description = "Adjust depending on shiny reveal animation duration",
+    Default = 0.5,
+    Min = 0.1,
+    Max = 3.0,
+    Rounding = 1 -- 1 decimal place (e.g. 0.5)
+})
+RevealDelaySlider:OnChanged(function(Value) getgenv().WaitBeforeNext = Value end)
+
+
+Tabs.Main:AddSection("Local Player")
+
+local WalkSpeedToggle = Tabs.Main:AddToggle("WalkSpeedToggle", { Title = "Enable WalkSpeed", Default = false })
+WalkSpeedToggle:OnChanged(function() getgenv().WalkSpeedEnabled = Options.WalkSpeedToggle.Value end)
+
+local WalkSpeedSlider = Tabs.Main:AddSlider("WalkSpeedSlider", {
+    Title = "WalkSpeed Amount",
+    Default = 16,
+    Min = 16,
+    Max = 250, 
+    Rounding = 0
+})
+WalkSpeedSlider:OnChanged(function(Value) getgenv().WalkSpeedValue = Value end)
+
+
+-- Config Saving & Settings Setup
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+SaveManager:IgnoreThemeSettings() 
+SaveManager:SetFolder("DawidHubConfig/AutoFarm")
+SaveManager:BuildConfigSection(Tabs.Settings) 
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+
+Window:SelectTab(1)
+SaveManager:LoadAutoloadConfig()
